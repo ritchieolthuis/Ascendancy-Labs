@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Save, CheckCircle, AlertCircle, ExternalLink, Key } from 'lucide-react';
+import { Save, CheckCircle, AlertCircle, ExternalLink, Key, Moon, Sun } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 
 interface SettingsProps {
   apiKey: string;
   setApiKey: (key: string) => void;
+  theme: 'light' | 'dark';
+  toggleTheme: () => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ apiKey, setApiKey }) => {
+const Settings: React.FC<SettingsProps> = ({ apiKey, setApiKey, theme, toggleTheme }) => {
   const [inputKey, setInputKey] = useState(apiKey);
-  const [status, setStatus] = useState<'idle' | 'testing' | 'valid' | 'invalid'>('idle');
+  const [status, setStatus] = useState<'idle' | 'testing' | 'valid' | 'invalid' | 'saved_with_error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
@@ -19,7 +21,7 @@ const Settings: React.FC<SettingsProps> = ({ apiKey, setApiKey }) => {
   const handleSave = async () => {
     const cleanKey = inputKey.trim();
     if (!cleanKey) return;
-
+    setApiKey(cleanKey);
     setStatus('testing');
     setErrorMessage('');
     
@@ -29,86 +31,100 @@ const Settings: React.FC<SettingsProps> = ({ apiKey, setApiKey }) => {
         model: 'gemini-2.5-flash',
         contents: 'ping',
       });
-      setApiKey(cleanKey);
       setStatus('valid');
     } catch (e: any) {
       console.error(e);
-      setStatus('invalid');
-      setErrorMessage(e.message || "Unknown error connecting to Google API");
+      setStatus('saved_with_error');
+      setErrorMessage(e.message || "Connection test failed, but Key was saved.");
     }
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-12 h-full flex flex-col justify-center">
-      <div className="text-center mb-10">
-        <h2 className="text-3xl font-bold text-slate-800 mb-2">System Configuration</h2>
-        <p className="text-slate-500">Connect your Google AI Studio account to power the agents.</p>
+    <div className="max-w-3xl mx-auto p-12 h-full flex flex-col justify-center">
+      <div className="text-center mb-8">
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2 drop-shadow-none dark:drop-shadow-[0_0_5px_rgba(255,255,255,0.2)]">System Configuration</h2>
+        <p className="text-slate-500 dark:text-slate-400">Connect to the Gemini Inference API & Customize Interface.</p>
       </div>
       
-      <div className="bg-white rounded-3xl border border-slate-100 shadow-soft p-10 relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-brand-blue to-brand-sky"></div>
-        
-        <div className="mb-10">
-          <label className="block text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
-            <Key size={16} className="text-brand-blue"/> Gemini API Key
-          </label>
-          <div className="relative">
-            <input
-              type="password"
-              value={inputKey}
-              onChange={(e) => setInputKey(e.target.value)}
-              placeholder="Paste your AIzaSy... key here"
-              className="w-full px-6 py-4 bg-slate-50 border border-slate-200 text-slate-800 font-mono text-sm focus:bg-white focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10 outline-none rounded-xl tracking-wide transition-all"
-            />
-          </div>
-          
-          <div className="mt-6 flex items-start gap-4 p-5 border border-blue-100 bg-blue-50/50 rounded-xl">
-            <div className="flex-1">
-               <p className="text-sm text-slate-600 leading-relaxed">
-                 You need a valid API key from Google AI Studio. Ensure billing is enabled for the project to avoid rate limits during bulk testing.
-               </p>
-               <a 
-                 href="https://aistudio.google.com/app/apikey" 
-                 target="_blank" 
-                 rel="noopener noreferrer"
-                 className="inline-flex items-center gap-2 text-xs font-bold text-brand-blue uppercase tracking-widest mt-3 hover:underline"
-               >
-                 Get API Key <ExternalLink size={12} />
-               </a>
-            </div>
-          </div>
+      <div className="space-y-6">
+        {/* Appearance Card */}
+        <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-8 shadow-sm dark:shadow-card">
+           <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-slate-900 dark:text-white text-base">Appearance</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Toggle between Light and Dark workspace.</p>
+              </div>
+              <button
+                onClick={toggleTheme}
+                className={`relative inline-flex h-8 w-16 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[#22d3ee] focus:ring-offset-2 ${
+                  theme === 'dark' ? 'bg-slate-700' : 'bg-slate-300'
+                }`}
+              >
+                <span
+                  className={`${
+                    theme === 'dark' ? 'translate-x-9' : 'translate-x-1'
+                  } inline-block h-6 w-6 transform rounded-full bg-white transition-transform flex items-center justify-center`}
+                >
+                  {theme === 'dark' ? <Moon size={14} className="text-slate-900" /> : <Sun size={14} className="text-orange-500" />}
+                </span>
+              </button>
+           </div>
         </div>
 
-        <div className="flex flex-col gap-6 items-center">
-          <div className="flex items-center gap-4 w-full">
+        {/* API Key Card */}
+        <div className="bg-white dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 p-8 shadow-sm dark:shadow-card">
+          <div className="mb-8">
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
+              <Key size={14} className="text-slate-400"/> API Credential
+            </label>
+            <div>
+              <input
+                type="password"
+                value={inputKey}
+                onChange={(e) => setInputKey(e.target.value)}
+                placeholder="Paste Key..."
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-sm focus:border-[#22d3ee] outline-none rounded-lg transition-all focus:shadow-[0_0_15px_rgba(34,211,238,0.2)]"
+              />
+            </div>
+            
+            <div className="mt-4 p-4 border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 rounded-lg flex justify-between items-center">
+              <span className="text-xs text-slate-500">
+                Requires Google AI Studio Key.
+              </span>
+              <a 
+                href="https://aistudio.google.com/app/apikey" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-xs font-bold text-[#22d3ee] hover:text-[#a855f7] transition-colors drop-shadow-none dark:drop-shadow-[0_0_5px_rgba(34,211,238,0.5)]"
+              >
+                Get Key <ExternalLink size={12} />
+              </a>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-4 items-center">
             <button
               onClick={handleSave}
               disabled={status === 'testing' || !inputKey}
-              className="bg-brand-blue hover:bg-blue-600 text-white px-8 py-4 text-sm font-bold rounded-xl shadow-lg hover:shadow-xl transition-all disabled:opacity-50 flex-1 flex justify-center transform hover:-translate-y-0.5"
+              className="w-full btn-ascendancy text-white py-3 text-sm font-bold rounded-lg transition-all disabled:opacity-50 flex justify-center shadow-md dark:shadow-[0_0_15px_rgba(255,255,255,0.2)]"
             >
-              {status === 'testing' ? (
-                <span className="animate-spin">⌛ Verifying...</span>
-              ) : (
-                "Save Configuration"
-              )}
+              {status === 'testing' ? "Verifying..." : "Save Configuration"}
             </button>
-          </div>
-          
-          {status === 'valid' && (
-            <div className="flex items-center gap-2 text-green-600 bg-green-50 px-4 py-2 rounded-full text-sm font-bold animate-fade-in">
-              <CheckCircle size={18} />
-              API Key Verified & Saved
-            </div>
-          )}
+            
+            {status === 'valid' && (
+              <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-500 text-sm font-bold drop-shadow-none dark:drop-shadow-[0_0_5px_rgba(16,185,129,0.5)]">
+                <CheckCircle size={16} />
+                Connected Successfully
+              </div>
+            )}
 
-          {status === 'invalid' && (
-            <div className="w-full p-4 border border-red-100 bg-red-50 text-red-600 rounded-xl text-sm font-medium flex items-center gap-3">
-               <AlertCircle size={20} />
-               <div>
-                 <strong>Connection Failed:</strong> {errorMessage}
-               </div>
-            </div>
-          )}
+            {(status === 'invalid' || status === 'saved_with_error') && (
+              <div className="w-full p-3 border border-red-200 dark:border-red-900/30 bg-red-50 dark:bg-red-900/10 text-red-600 dark:text-red-400 rounded-lg text-xs flex items-center gap-3">
+                <AlertCircle size={16} className="flex-shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

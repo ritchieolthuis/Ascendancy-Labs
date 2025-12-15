@@ -16,7 +16,6 @@ const DemoChat: React.FC<DemoChatProps> = ({ apiKey, agents }) => {
   const chatSessionRef = useRef<Chat | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-select agent with robust fallback
   useEffect(() => {
     if (agents.length > 0) {
       if (!selectedAgentId || !agents.find(a => a.id === selectedAgentId)) {
@@ -71,21 +70,21 @@ const DemoChat: React.FC<DemoChatProps> = ({ apiKey, agents }) => {
     }
   };
 
-  if (agents.length === 0) return <div className="flex h-full items-center justify-center text-slate-400 font-medium">NO AGENTS CONFIGURED</div>;
+  if (agents.length === 0) return <div className="flex h-full items-center justify-center text-slate-500 font-medium bg-slate-50 dark:bg-[#020617]">NO AGENTS</div>;
 
   return (
-    <div className="flex flex-col h-full bg-[#F8FAFC]">
+    <div className="flex flex-col h-full bg-slate-50 dark:bg-[#020617]">
       {/* Header */}
-      <div className="p-6 bg-white border-b border-slate-100 flex items-center justify-between shadow-sm z-10">
-        <div className="flex items-center gap-6 flex-1">
+      <div className="p-4 bg-slate-50 dark:bg-[#020617] border-b border-slate-200 dark:border-slate-800/50 flex items-center justify-between z-10">
+        <div className="flex items-center gap-4 flex-1">
           <div className="flex-1 max-w-sm">
-             <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Live Demo Session</label>
+             <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Live Session</label>
              <select
                value={selectedAgentId}
                onChange={(e) => setSelectedAgentId(e.target.value)}
-               className="w-full px-4 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 text-sm focus:bg-white focus:border-brand-blue outline-none font-medium transition-all"
+               className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-sm focus:border-[#22d3ee] outline-none font-medium appearance-none"
              >
-               <option value="">-- Select Agent --</option>
+               <option value="">Select Agent</option>
                {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
              </select>
           </div>
@@ -94,40 +93,38 @@ const DemoChat: React.FC<DemoChatProps> = ({ apiKey, agents }) => {
         {selectedAgentId && (
           <button 
             onClick={() => { setMessages([]); if(chatSessionRef.current) chatSessionRef.current = null; setSelectedAgentId(selectedAgentId); }} 
-            className="text-slate-400 hover:text-red-500 transition-colors bg-slate-50 p-2 rounded-lg"
+            className="text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-[#22d3ee]/50"
             title="Clear Chat"
           >
-            <Trash2 size={20} />
+            <Trash2 size={16} />
           </button>
         )}
       </div>
 
       {/* Chat Area */}
       {!selectedAgentId ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
-           <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-soft mb-6">
-             <Bot size={48} className="text-brand-blue opacity-50"/>
-           </div>
-           <p className="font-bold text-sm uppercase tracking-widest text-slate-400">Initialize Agent Uplink</p>
+        <div className="flex-1 flex flex-col items-center justify-center text-slate-400 dark:text-slate-600">
+           <Bot size={48} className="mb-4 opacity-20"/>
+           <p className="font-medium text-sm">Select an agent to start</p>
         </div>
       ) : (
         <>
-          <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-slate-50 dark:bg-[#020617]">
             {messages.length === 0 && (
-                <div className="text-center mt-10">
-                    <p className="text-slate-400 text-sm">Start the conversation with <span className="font-bold text-slate-600">{selectedAgent?.name}</span></p>
+                <div className="text-center mt-12">
+                    <p className="text-gradient text-xs uppercase tracking-widest font-bold drop-shadow-none dark:drop-shadow-[0_0_5px_rgba(34,211,238,0.5)]">Conversation Started</p>
                 </div>
             )}
             {messages.map((msg) => (
               <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`flex items-end gap-3 max-w-[80%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm ${msg.role === 'user' ? 'bg-brand-blue text-white' : 'bg-white text-brand-blue'}`}>
-                        {msg.role === 'user' ? <User size={14}/> : <Bot size={16}/>}
+                <div className={`flex items-end gap-3 max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 border border-slate-200 dark:border-slate-800 ${msg.role === 'user' ? 'bg-gradient-to-br from-[#22d3ee] via-[#3b82f6] to-[#a855f7] text-white border-none shadow-sm dark:shadow-[0_0_10px_rgba(34,211,238,0.5)]' : 'bg-white dark:bg-slate-900 text-slate-400'}`}>
+                        {msg.role === 'user' ? <User size={14}/> : <Bot size={14}/>}
                     </div>
-                    <div className={`px-6 py-4 rounded-2xl shadow-sm text-sm leading-relaxed whitespace-pre-wrap ${
+                    <div className={`px-5 py-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
                     msg.role === 'user' 
-                        ? 'bg-brand-blue text-white rounded-br-none' 
-                        : 'bg-white text-slate-700 border border-slate-100 rounded-bl-none'
+                        ? 'bg-gradient-to-br from-[#22d3ee] via-[#3b82f6] to-[#a855f7] text-white rounded-br-sm shadow-sm dark:shadow-[0_0_15px_rgba(34,211,238,0.3)]' 
+                        : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 rounded-bl-sm'
                     }`}>
                         {msg.text}
                     </div>
@@ -137,11 +134,11 @@ const DemoChat: React.FC<DemoChatProps> = ({ apiKey, agents }) => {
             {isLoading && (
               <div className="flex justify-start">
                   <div className="flex items-end gap-3">
-                     <div className="w-8 h-8 rounded-full bg-white text-brand-blue flex items-center justify-center flex-shrink-0 shadow-sm"><Bot size={16}/></div>
-                     <div className="bg-white border border-slate-100 px-5 py-4 rounded-2xl rounded-bl-none shadow-sm flex gap-2">
-                        <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce"></div>
-                        <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce delay-75"></div>
-                        <div className="w-2 h-2 bg-slate-300 rounded-full animate-bounce delay-150"></div>
+                     <div className="w-8 h-8 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-400 flex items-center justify-center flex-shrink-0"><Bot size={14}/></div>
+                     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-4 py-3 rounded-2xl rounded-bl-sm flex gap-1.5">
+                        <div className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-600 rounded-full animate-bounce"></div>
+                        <div className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-600 rounded-full animate-bounce delay-75"></div>
+                        <div className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-600 rounded-full animate-bounce delay-150"></div>
                      </div>
                   </div>
               </div>
@@ -149,23 +146,23 @@ const DemoChat: React.FC<DemoChatProps> = ({ apiKey, agents }) => {
             <div ref={messagesEndRef} />
           </div>
 
-          <div className="p-6 bg-white border-t border-slate-100 shadow-soft">
+          <div className="p-4 bg-slate-50 dark:bg-[#020617] border-t border-slate-200 dark:border-slate-800">
             <div className="max-w-4xl mx-auto flex items-center gap-3">
               <input
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={`Message ${selectedAgent?.name}...`}
-                className="flex-1 px-6 py-4 bg-slate-50 border border-slate-200 rounded-full text-slate-700 focus:outline-none focus:bg-white focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10 transition-all placeholder-slate-400"
+                placeholder={`Message...`}
+                className="flex-1 px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:border-[#22d3ee] transition-all placeholder-slate-400 dark:placeholder-slate-600 text-sm focus:shadow-[0_0_10px_rgba(34,211,238,0.2)]"
                 disabled={isLoading}
               />
               <button
                 onClick={handleSend}
                 disabled={!input.trim() || isLoading}
-                className="p-4 bg-brand-blue text-white rounded-full hover:bg-blue-600 transition-colors disabled:opacity-50 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                className="p-3 btn-ascendancy text-white rounded-lg transition-colors disabled:opacity-50 shadow-md dark:shadow-lg"
               >
-                <Send size={20} />
+                <Send size={18} />
               </button>
             </div>
           </div>

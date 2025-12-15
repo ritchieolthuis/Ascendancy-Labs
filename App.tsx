@@ -8,56 +8,59 @@ import Settings from './components/Settings';
 import Dashboard from './components/Dashboard';
 import SocialMedia from './components/SocialMedia';
 import { Agent, ViewState, TestRun } from './types';
+import { db } from './services/db';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>('dashboard');
 
-  // Persistent State
-  const [apiKey, setApiKey] = useState<string>(() => {
-    return "AIzaSyCrZd-4X0hVcOBCT_gNS7PtK4gT1NvISFU";
-  });
-  
-  const [agents, setAgents] = useState<Agent[]>(() => {
-    const saved = localStorage.getItem('agent_architect_agents');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [testRuns, setTestRuns] = useState<TestRun[]>(() => {
-    const saved = localStorage.getItem('agent_architect_runs');
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Load Initial State from Database Service
+  const [apiKey, setApiKey] = useState<string>(db.settings.getApiKey());
+  const [theme, setTheme] = useState<'light' | 'dark'>(db.settings.getTheme());
+  const [agents, setAgents] = useState<Agent[]>(db.agents.list());
+  const [testRuns, setTestRuns] = useState<TestRun[]>(db.runs.list());
 
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
 
+  // Theme Management
   useEffect(() => {
-    try {
-      localStorage.setItem('agent_architect_agents', JSON.stringify(agents));
-    } catch (e) {
-      console.error("Failed to save agents to localStorage (quota exceeded?)", e);
-      alert("Storage full: Could not save recent changes.");
+    const root = window.document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
     }
-  }, [agents]);
+    db.settings.setTheme(theme);
+  }, [theme]);
 
+  // Update DB setting when API Key changes
   useEffect(() => {
-    try {
-      localStorage.setItem('agent_architect_runs', JSON.stringify(testRuns));
-    } catch (e) {
-      console.error("Failed to save runs", e);
-    }
-  }, [testRuns]);
+    db.settings.setApiKey(apiKey);
+  }, [apiKey]);
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  };
+
+  // --- ACTIONS (Database Interactions) ---
 
   const handleAgentCreated = (agent: Agent) => {
-    setAgents(prev => [...prev, agent]);
+    // Save to DB
+    db.agents.add(agent);
+    // Update State
+    setAgents(db.agents.list());
     // Auto-navigate to Test view to confirm creation and start workflow
     setCurrentView('test');
   };
 
-  const handleTestRunComplete = (run: TestRun) => {
-    setTestRuns(prev => [run, ...prev]);
+  const handleAgentUpdate = (updatedAgent: Agent) => {
+    db.agents.update(updatedAgent);
+    setAgents(db.agents.list());
+    setEditingAgent(null);
   };
 
-  const handleAgentUpdate = (updatedAgent: Agent) => {
-    setAgents(prev => prev.map(a => a.id === updatedAgent.id ? updatedAgent : a));
-    setEditingAgent(null);
+  const handleTestRunComplete = (run: TestRun) => {
+    db.runs.add(run);
+    setTestRuns(db.runs.list());
   };
 
   const handleEditAgent = (agent: Agent) => {
@@ -71,7 +74,7 @@ const App: React.FC = () => {
   };
 
   const handleNavigate = (view: ViewState) => {
-    // Clear editing state if navigating away from build manually (unless we handle it in BuildAgent)
+    // Clear editing state if navigating away from build manually
     if (view !== 'build') {
       setEditingAgent(null);
     }
@@ -101,7 +104,14 @@ const App: React.FC = () => {
       case 'demo':
         return <DemoChat apiKey={apiKey} agents={agents} />;
       case 'settings':
-        return <Settings apiKey={apiKey} setApiKey={setApiKey} />;
+        return (
+          <Settings 
+            apiKey={apiKey} 
+            setApiKey={setApiKey} 
+            theme={theme}
+            toggleTheme={toggleTheme}
+          />
+        );
       default:
         return <Dashboard onNavigate={handleNavigate} agents={agents} runs={testRuns} onEditAgent={handleEditAgent} />;
     }

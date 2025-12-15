@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Bot, Wand2, Copy, ArrowRight, Share2, X, FileText, Sparkles, Upload, Link as LinkIcon, FileCheck, Loader2, Trash2, Globe, ExternalLink, CheckSquare, Square, Settings as SettingsIcon } from 'lucide-react';
+import { Bot, Wand2, Copy, ArrowRight, Share2, X, FileText, Sparkles, Upload, Link as LinkIcon, FileCheck, Loader2, Trash2, Globe, ExternalLink, CheckSquare, Square, Settings as SettingsIcon, AlertTriangle, RefreshCw, Search, MessageSquare, Languages } from 'lucide-react';
 import { Agent } from '../types';
-import { generateSystemPrompt, summarizeDocument, generateSectorInsights } from '../services/geminiService';
+import { generateSystemPrompt, summarizeDocument, generateSectorInsights, analyzeCompanyWebsite } from '../services/geminiService';
 // @ts-ignore
 import * as mammoth from 'mammoth';
 // @ts-ignore
@@ -23,7 +23,7 @@ const InputField = ({
   rows?: number;
 }) => (
   <div className="mb-6">
-    <label className="block text-sm font-semibold text-slate-700 mb-2">
+    <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
       {label}
     </label>
     {multiline ? (
@@ -32,7 +32,7 @@ const InputField = ({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         rows={rows}
-        className="w-full px-5 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 placeholder-slate-400 focus:bg-white focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10 transition-all text-sm leading-relaxed resize-none font-medium shadow-sm"
+        className="w-full px-4 py-3 rounded-lg bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700/50 text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-600 focus:border-[#22d3ee] focus:ring-1 focus:ring-[#a855f7] focus:shadow-[0_0_10px_rgba(34,211,238,0.2)] transition-all text-sm leading-relaxed resize-none"
       />
     ) : (
       <input
@@ -40,7 +40,7 @@ const InputField = ({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full px-5 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 placeholder-slate-400 focus:bg-white focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10 transition-all text-sm font-medium shadow-sm"
+        className="w-full px-4 py-3 rounded-lg bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700/50 text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-600 focus:border-[#22d3ee] focus:ring-1 focus:ring-[#a855f7] focus:shadow-[0_0_10px_rgba(34,211,238,0.2)] transition-all text-sm"
       />
     )}
   </div>
@@ -52,6 +52,8 @@ interface SourceItem {
   type: 'pdf' | 'word' | 'excel' | 'link' | 'text' | 'sector';
   status: 'pending' | 'processing' | 'ready' | 'error';
   summary?: string;
+  uri?: string;
+  description?: string;
 }
 
 interface BuildAgentProps {
@@ -66,51 +68,62 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
+    website: '',
     description: '',
     flow: '',
     language: '',
     rules: '',
     companyInfo: ''
   });
-  
-  // Sector Enrichment State
+
+  const [languageMode, setLanguageMode] = useState<'fixed' | 'auto'>('fixed');
   const [enrichWithSectorData, setEnrichWithSectorData] = useState(false);
   const [isSectorLoading, setIsSectorLoading] = useState(false);
   const [showSectorModal, setShowSectorModal] = useState(false);
-  const [foundSectorSources, setFoundSectorSources] = useState<Array<{title: string; description: string; content: string}>>([]);
+  const [foundSectorSources, setFoundSectorSources] = useState<Array<{title: string; description: string; content: string; uri?: string}>>([]);
   const [selectedSectorIndices, setSelectedSectorIndices] = useState<Set<number>>(new Set());
-  
+  const [isAnalyzingSite, setIsAnalyzingSite] = useState(false);
+  const [showWebsiteMissingModal, setShowWebsiteMissingModal] = useState(false);
+  const [tempWebsiteInput, setTempWebsiteInput] = useState('');
   const [generatedPrompt, setGeneratedPrompt] = useState('');
   const [showIntegration, setShowIntegration] = useState(false);
-  
-  // Sources State
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [linkInput, setLinkInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (initialAgent) {
+      let lang = initialAgent.languageStyle;
+      let mode: 'fixed' | 'auto' = 'fixed';
+      
+      if (lang.startsWith('[AUTO-MATCH] ')) {
+        mode = 'auto';
+        lang = lang.replace('[AUTO-MATCH] ', '');
+      }
+
       setFormData({
         name: initialAgent.name,
+        website: initialAgent.website || '',
         description: initialAgent.description,
         flow: initialAgent.conversationFlow,
-        language: initialAgent.languageStyle,
+        language: lang,
         rules: initialAgent.rules,
         companyInfo: initialAgent.companyInfo
       });
+      setLanguageMode(mode);
       setGeneratedPrompt(initialAgent.systemPrompt);
-      // Note: We cannot recover 'sources' array purely from Agent type, 
-      // but the data is inside companyInfo so it's safe to edit.
       setSources([]); 
     } else {
       setFormData({
         name: '',
+        website: '',
         description: '',
         flow: '',
         language: '',
         rules: '',
         companyInfo: ''
       });
+      setLanguageMode('fixed');
       setGeneratedPrompt('');
       setSources([]);
     }
@@ -119,19 +132,49 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
   const prefillData = () => {
     setFormData({
       name: 'Solar AI for Suntan v1',
+      website: 'www.suntansolar.com',
       description: 'You are an engaging, helpful sales receptionist for Suntan Solar. Your goal is to qualify leads and book appointments.',
       flow: '1. Acknowledge objection/question first. 2. Ask "How long have you been looking into solar?". 3. Ask "What is your average monthly electric bill?". 4. If bill > $150, say "That is high, we can fix that". 5. Ask for phone number to book a call.',
       language: 'Casual, friendly, Grade 5 reading level. Like two friends texting. Use "Gotcha", "No worries".',
       rules: 'One question at a time. Keep responses under 2 sentences. No robot speak. If they ask for pricing, give a range but say a call is needed for exact quote.',
       companyInfo: 'Suntan Solar, based in California. Best warranties in the industry (25 years). We use micro-inverters. 0$ down financing available. Contact: 555-0123.'
     });
+    setLanguageMode('fixed');
   };
 
   const updateField = (field: keyof typeof formData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  // --- Source Handling ---
+  const getFormattedLanguage = () => {
+    return languageMode === 'auto' ? `[AUTO-MATCH] ${formData.language}` : formData.language;
+  };
+
+  const handleUrlAnalysis = async () => {
+    if (!apiKey) {
+      alert("Please configure your API Key in settings first.");
+      return;
+    }
+    if (!formData.website) {
+      alert("Please enter a website URL first.");
+      return;
+    }
+    
+    setIsAnalyzingSite(true);
+    try {
+      const analysis = await analyzeCompanyWebsite(apiKey, formData.website, formData.name || "The Company");
+      const newInfo = formData.companyInfo 
+        ? formData.companyInfo + "\n\n" + "--- WEBSITE DEEP DIVE ---\n" + analysis
+        : "--- WEBSITE DEEP DIVE ---\n" + analysis;
+
+      updateField('companyInfo', newInfo);
+    } catch (e: any) {
+      console.error(e);
+      alert(e.message || "Failed to analyze website.");
+    } finally {
+      setIsAnalyzingSite(false);
+    }
+  };
 
   const generateSafeId = () => {
     return Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -161,10 +204,8 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
     try {
       let extractedText = "";
 
-      // Strategy based on file type
       if (type === 'word') {
         const arrayBuffer = await file.arrayBuffer();
-        // Handle mammoth import variations
         const mammothLib = (mammoth as any).default || mammoth;
         const result = await mammothLib.extractRawText({ arrayBuffer });
         extractedText = result.value;
@@ -175,22 +216,18 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
          extractedText = xlsxLib.utils.sheet_to_csv(firstSheet);
       } else if (type === 'pdf') {
-         // Convert PDF to Base64
          const base64 = await new Promise<string>((resolve) => {
            const reader = new FileReader();
            reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
            reader.readAsDataURL(file);
          });
-         // Send to Gemini as Inline Data
          const summary = await summarizeDocument(apiKey, { inlineData: { data: base64, mimeType: 'application/pdf' } }, file.name);
          finishSource(sourceId, summary);
          return;
       } else {
-        // Text files
         extractedText = await file.text();
       }
 
-      // Summarize extracted text
       const summary = await summarizeDocument(apiKey, { text: extractedText }, file.name);
       finishSource(sourceId, summary);
 
@@ -202,7 +239,6 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
 
   const finishSource = (id: string, summary: string) => {
     setSources(prev => prev.map(s => s.id === id ? { ...s, status: 'ready', summary } : s));
-    // Append to Company Info immediately
     setFormData(prev => ({
       ...prev,
       companyInfo: prev.companyInfo + `\n\n--- SOURCE: ${sources.find(x => x.id === id)?.name || 'Doc'} ---\n${summary}`
@@ -218,28 +254,55 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
 
     const sourceId = generateSafeId();
     const url = linkInput;
-    setSources(prev => [...prev, { id: sourceId, name: url, type: 'link', status: 'ready' }]); // Assume ready, we just append URL
+    setSources(prev => [...prev, { id: sourceId, name: url, type: 'link', status: 'ready' }]);
     setLinkInput('');
     
-    // For links, we can't scrape client-side easily, so we just append the URL and ask the prompt to use knowledge about it if possible
-    // OR we ask the user to provide context. For now, we append it.
     setFormData(prev => ({
       ...prev,
       companyInfo: prev.companyInfo + `\n\n--- REFERENCE LINK ---\n${url}\n(Note: The agent should use its internal knowledge about this website if available)`
     }));
   };
 
-  // --- Sector Logic ---
+  const executeSectorEnrichment = async (url: string) => {
+    if (!apiKey) {
+      alert("API Key is missing or invalid. Please go to Settings to configure your Gemini API Key.");
+      setEnrichWithSectorData(false);
+      return;
+    }
+
+    setEnrichWithSectorData(true);
+    setIsSectorLoading(true);
+    setFoundSectorSources([]); 
+    
+    try {
+      const insights = await generateSectorInsights(apiKey, {
+        name: formData.name,
+        websiteUrl: url,
+        description: formData.description,
+        existingInfo: formData.companyInfo
+      });
+      
+      setFoundSectorSources(insights);
+      setSelectedSectorIndices(new Set(insights.filter(s => s.uri).map((_, i) => i)));
+      setIsSectorLoading(false);
+      setShowSectorModal(true);
+
+    } catch (e: any) {
+      console.error(e);
+      let msg = "Failed to fetch sector data.";
+      if (e.message?.includes('403')) msg += " Check if your API Key has billing enabled (required for Search Grounding).";
+      alert(msg);
+      setEnrichWithSectorData(false);
+      setIsSectorLoading(false);
+    }
+  };
 
   const handleSectorToggle = async (enabled: boolean) => {
-    // If turning off, just remove everything
     if (!enabled) {
         setEnrichWithSectorData(false);
-        // Remove all sector sources
         const sectorIds = sources.filter(s => s.type === 'sector').map(s => s.id);
         setSources(prev => prev.filter(s => s.type !== 'sector'));
         
-        // Remove content from text area
         let newText = formData.companyInfo;
         sectorIds.forEach(id => {
             const regex = new RegExp(`\\n*<<<< SECTOR_START:${id} >>>>[\\s\\S]*?<<<< SECTOR_END >>>>`, 'g');
@@ -249,58 +312,52 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
         return;
     }
 
-    // If turning on, fetch insights first, then show modal
-    if (!apiKey) {
-      alert("Enter API Key first.");
+    if (!formData.website || formData.website.trim() === '') {
+      setTempWebsiteInput('');
+      setShowWebsiteMissingModal(true);
       return;
     }
 
-    setEnrichWithSectorData(true);
-    setIsSectorLoading(true);
-    
-    try {
-      const insights = await generateSectorInsights(apiKey, {
-        name: formData.name,
-        description: formData.description,
-        existingInfo: formData.companyInfo
-      });
-      
-      setFoundSectorSources(insights);
-      // Select all by default
-      setSelectedSectorIndices(new Set(insights.map((_, i) => i)));
-      setIsSectorLoading(false);
-      setShowSectorModal(true);
+    await executeSectorEnrichment(formData.website);
+  };
 
-    } catch (e) {
-      console.error(e);
-      alert("Failed to fetch sector data.");
-      setEnrichWithSectorData(false);
-      setIsSectorLoading(false);
-    }
+  const confirmWebsiteModal = () => {
+    if (!tempWebsiteInput.trim()) return;
+    updateField('website', tempWebsiteInput);
+    setShowWebsiteMissingModal(false);
+    executeSectorEnrichment(tempWebsiteInput);
   };
 
   const handleImportSectorSources = () => {
     const selectedInsights = foundSectorSources.filter((_, idx) => selectedSectorIndices.has(idx));
-    
-    const newSources: SourceItem[] = selectedInsights.map((insight, idx) => ({
+    const existingUris = new Set(sources.map(s => s.uri).filter(u => !!u));
+
+    const newSources: SourceItem[] = selectedInsights
+      .filter(insight => !insight.uri || !existingUris.has(insight.uri))
+      .map((insight, idx) => ({
        id: `sector-${Date.now()}-${idx}`,
        name: insight.title,
        type: 'sector',
        status: 'ready',
-       summary: insight.content
+       summary: insight.content,
+       uri: insight.uri,
+       description: insight.description
     }));
+
+    if (newSources.length === 0 && selectedInsights.length > 0) {
+      setShowSectorModal(false);
+      return;
+    }
 
     setSources(prev => [...prev, ...newSources]);
     
-    // Append text to the editor
     let newText = formData.companyInfo;
     newSources.forEach(s => {
-       newText += `\n\n<<<< SECTOR_START:${s.id} >>>>\n[SOURCE: ${s.name}]\n${s.summary}\n<<<< SECTOR_END >>>>`;
+       const uriText = s.uri ? `\n[SOURCE URL: ${s.uri}]` : '';
+       newText += `\n\n<<<< SECTOR_START:${s.id} >>>>\n[SOURCE: ${s.name}]${uriText}\nDESCRIPTION: ${s.description}\nCONTENT: ${s.summary}\n<<<< SECTOR_END >>>>`;
     });
     updateField('companyInfo', newText);
-    
     setShowSectorModal(false);
-    // Note: enrichWithSectorData remains true
   };
 
   const toggleSectorSelection = (index: number) => {
@@ -314,10 +371,8 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
   };
 
   const removeSource = (id: string) => {
-    // Check type to handle text cleanup
     const source = sources.find(s => s.id === id);
     if (source && source.type === 'sector') {
-       // Remove its text block
        const regex = new RegExp(`\\n*<<<< SECTOR_START:${id} >>>>[\\s\\S]*?<<<< SECTOR_END >>>>`, 'g');
        const newText = formData.companyInfo.replace(regex, '').trim();
        updateField('companyInfo', newText);
@@ -325,14 +380,11 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
 
     setSources(prev => prev.filter(s => s.id !== id));
     
-    // If no sector sources left, turn toggle off visually
     if (source?.type === 'sector') {
        const remainingSector = sources.filter(s => s.id !== id && s.type === 'sector');
        if (remainingSector.length === 0) setEnrichWithSectorData(false);
     }
   };
-
-  // ---
 
   const handleGenerate = async () => {
     if (!apiKey) {
@@ -349,9 +401,10 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
     try {
       const prompt = await generateSystemPrompt(apiKey, {
         name: formData.name,
+        website: formData.website,
         description: formData.description,
         flow: formData.flow,
-        language: formData.language,
+        language: getFormattedLanguage(),
         rules: formData.rules,
         info: formData.companyInfo,
         enrichWithSectorData: enrichWithSectorData
@@ -376,9 +429,10 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
       const agentData: Agent = {
         id: initialAgent ? initialAgent.id : generateSafeId(),
         name: formData.name,
+        website: formData.website,
         description: formData.description,
         conversationFlow: formData.flow,
-        languageStyle: formData.language,
+        languageStyle: getFormattedLanguage(),
         rules: formData.rules,
         companyInfo: formData.companyInfo,
         systemPrompt: generatedPrompt,
@@ -397,93 +451,140 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
   };
 
   return (
-    <div className="h-full flex flex-col xl:flex-row bg-[#F8FAFC] relative">
+    <div className="h-full flex flex-col xl:flex-row bg-slate-50 dark:bg-[#020617] relative text-slate-900 dark:text-slate-200">
       {/* Input Column */}
       <div className="flex-1 overflow-y-auto p-8 md:p-12 custom-scrollbar z-10">
         <div className="max-w-4xl mx-auto">
-          <div className="mb-10 flex justify-between items-end">
+          <div className="mb-10 flex justify-between items-end border-b border-slate-200 dark:border-slate-800/50 pb-8">
             <div>
-              <h1 className="text-3xl font-bold text-slate-800 mb-2">{initialAgent ? 'Edit Agent' : 'Build Agent'}</h1>
-              <p className="text-slate-500">{initialAgent ? 'Modify your agent\'s personality and settings.' : 'Design your AI assistant\'s personality and knowledge.'}</p>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-1 drop-shadow-none dark:drop-shadow-[0_0_8px_rgba(255,255,255,0.2)]">{initialAgent ? 'Configuration' : 'New Agent'}</h1>
+              <p className="text-slate-500 dark:text-slate-400 text-sm">Define the personality and knowledge base.</p>
             </div>
             {initialAgent ? (
                <button 
                 onClick={onCancelEdit}
-                className="text-xs bg-slate-100 border border-slate-200 text-slate-600 px-4 py-2.5 rounded-lg flex items-center gap-2 transition-all font-semibold hover:bg-slate-200"
+                className="text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
-                Cancel Edit
+                Cancel
               </button>
             ) : (
               <button 
                 onClick={prefillData}
-                className="text-xs bg-white border border-slate-200 text-slate-600 px-4 py-2.5 rounded-lg flex items-center gap-2 transition-all font-semibold hover:shadow-md hover:border-brand-blue/30 hover:text-brand-blue"
+                className="text-xs bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/50 text-slate-600 dark:text-slate-300 px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
-                <FileText size={14}/> Fill Example Data
+                <FileText size={14}/> Example Data
               </button>
             )}
           </div>
-
-          <div className="bg-white p-8 rounded-3xl shadow-soft border border-slate-100">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 mb-6">
-                   <div className="w-8 h-8 rounded-full bg-blue-100 text-brand-blue flex items-center justify-center font-bold text-sm">1</div>
-                   <h3 className="text-lg font-bold text-slate-800">Identity & Flow</h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+              <div className="space-y-6">
+                <div className="flex items-center gap-3 mb-2 text-slate-900 dark:text-white font-bold">
+                   <div className="w-6 h-6 rounded bg-gradient-to-br from-[#22d3ee] via-[#a855f7] to-[#d946ef] text-white flex items-center justify-center text-xs shadow-sm dark:shadow-neon">1</div>
+                   <h3>Identity & Behavior</h3>
                 </div>
                 
                 <InputField 
                   label="Agent Name" 
                   value={formData.name} 
                   onChange={(val) => updateField('name', val)} 
-                  placeholder="e.g. Solar AI for Suntan v1" 
+                  placeholder="e.g. Solar Assistant" 
                 />
+                
+                <div className="mb-6">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Company Website</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={formData.website}
+                      onChange={(e) => updateField('website', e.target.value)}
+                      placeholder="e.g. www.example.com"
+                      className="w-full pl-4 pr-24 py-3 rounded-lg bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700/50 text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-600 focus:border-[#22d3ee] focus:ring-1 focus:ring-[#a855f7] focus:shadow-[0_0_10px_rgba(34,211,238,0.2)] transition-all text-sm"
+                    />
+                    <button 
+                      onClick={handleUrlAnalysis}
+                      disabled={isAnalyzingSite || !formData.website}
+                      className="absolute right-2 top-2 bottom-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded text-xs font-medium px-3 flex items-center gap-2 text-slate-600 dark:text-slate-200 transition-colors"
+                    >
+                      {isAnalyzingSite ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                      Scan
+                    </button>
+                  </div>
+                </div>
+
                 <InputField 
                   label="Role Description" 
                   value={formData.description} 
                   onChange={(val) => updateField('description', val)} 
-                  placeholder="Describe role, goal, tone-of-voice..." 
+                  placeholder="Primary objective and role..." 
                   multiline 
                 />
                 <InputField 
-                  label="Conversation Flow" 
+                  label="Conversation Logic" 
                   value={formData.flow} 
                   onChange={(val) => updateField('flow', val)} 
-                  placeholder="Step 1: Greet. Step 2: Qualify..." 
+                  placeholder="Step-by-step interaction flow..." 
                   multiline 
                 />
-                <InputField 
-                  label="Language Style" 
-                  value={formData.language} 
-                  onChange={(val) => updateField('language', val)} 
-                  placeholder="Casual, professional, grade 5 reading level..." 
-                />
+                
+                <div className="mb-6">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Voice & Tone</label>
+                  <div className="flex gap-2 mb-3">
+                     <button
+                       onClick={() => setLanguageMode('fixed')}
+                       className={`flex-1 py-2 px-3 rounded-lg border text-xs font-bold transition-all ${
+                         languageMode === 'fixed' 
+                         ? 'bg-[#22d3ee]/10 border-[#22d3ee] text-slate-900 dark:text-white shadow-sm dark:shadow-neon' 
+                         : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                       }`}
+                     >
+                       Fixed Language
+                     </button>
+                     <button
+                       onClick={() => setLanguageMode('auto')}
+                       className={`flex-1 py-2 px-3 rounded-lg border text-xs font-bold transition-all ${
+                         languageMode === 'auto' 
+                         ? 'bg-[#22d3ee]/10 border-[#22d3ee] text-slate-900 dark:text-white shadow-sm dark:shadow-neon' 
+                         : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                       }`}
+                     >
+                       Auto-Detect
+                     </button>
+                  </div>
+                  
+                  <input
+                    type="text"
+                    value={formData.language}
+                    onChange={(e) => updateField('language', e.target.value)}
+                    placeholder={languageMode === 'auto' ? "Describe personality (Friendly, Professional)..." : "Specific language (Dutch, English)..."}
+                    className="w-full px-4 py-3 rounded-lg bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700/50 text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-600 focus:border-[#22d3ee] focus:ring-1 focus:ring-[#a855f7] focus:shadow-[0_0_10px_rgba(34,211,238,0.2)] transition-all text-sm"
+                  />
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 mb-6">
-                   <div className="w-8 h-8 rounded-full bg-accent-yellow/20 text-accent-yellow flex items-center justify-center font-bold text-sm">2</div>
-                   <h3 className="text-lg font-bold text-slate-800">Knowledge Base</h3>
+              <div className="space-y-6">
+                <div className="flex items-center gap-3 mb-2 text-slate-900 dark:text-white font-bold">
+                   <div className="w-6 h-6 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-white flex items-center justify-center text-xs">2</div>
+                   <h3>Knowledge & Rules</h3>
                 </div>
                 
                 <InputField 
-                  label="Operational Rules" 
+                  label="Strict Guidelines" 
                   value={formData.rules} 
                   onChange={(val) => updateField('rules', val)} 
-                  placeholder="One question at a time. No emojis..." 
+                  placeholder="Do's and Don'ts..." 
                   multiline 
                 />
                 
-                {/* Knowledge Sources Section */}
                 <div className="mb-6">
-                   <label className="block text-sm font-semibold text-slate-700 mb-2">Sources & Documents</label>
+                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Sources</label>
                    
-                   {/* File/Link Actions */}
-                   <div className="flex gap-2 mb-4">
+                   <div className="flex gap-2 mb-3">
                       <button 
                         onClick={() => fileInputRef.current?.click()}
-                        className="bg-slate-50 border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-white hover:border-brand-blue hover:text-brand-blue transition-all flex items-center gap-2"
+                        className="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
                       >
-                         <Upload size={14}/> Upload File
+                         <Upload size={14}/> Upload
                       </button>
                       <input 
                         type="file" 
@@ -492,7 +593,7 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
                         accept=".pdf,.docx,.xlsx,.txt,.csv"
                         onChange={(e) => {
                           if (e.target.files?.[0]) processFile(e.target.files[0]);
-                          e.target.value = ''; // reset
+                          e.target.value = ''; 
                         }}
                       />
                       
@@ -501,35 +602,35 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
                            type="text" 
                            value={linkInput}
                            onChange={(e) => setLinkInput(e.target.value)}
-                           placeholder="Paste Website URL..."
-                           className="w-full px-4 py-2 pr-10 rounded-xl bg-slate-50 border border-slate-200 text-xs focus:bg-white focus:border-brand-blue outline-none transition-all"
+                           placeholder="Add URL..."
+                           className="w-full px-3 py-2 pr-8 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:border-[#22d3ee] outline-none transition-all h-[34px]"
                          />
                          <button 
                            onClick={handleLinkAdd}
-                           className="absolute right-2 top-1.5 text-slate-400 hover:text-brand-blue"
+                           className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white"
                          >
                            <ArrowRight size={14} />
                          </button>
                       </div>
                    </div>
 
-                   {/* Sources List */}
                    <div className="space-y-2 mb-4">
                      {sources.map(s => (
-                       <div key={s.id} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-100 rounded-lg group animate-fade-in">
+                       <div key={s.id} className="flex items-center justify-between p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg group">
                           <div className="flex items-center gap-3 overflow-hidden">
-                             <div className={`w-8 h-8 rounded-full bg-white border border-slate-200 flex items-center justify-center ${s.type === 'sector' ? 'text-brand-blue' : 'text-slate-500'}`}>
+                             <div className="text-slate-400 dark:text-slate-500">
                                 {s.type === 'link' ? <LinkIcon size={14}/> : s.type === 'sector' ? <Globe size={14}/> : <FileCheck size={14}/>}
                              </div>
                              <div className="flex flex-col">
-                                <span className="text-xs font-bold text-slate-700 truncate max-w-[150px]">{s.name}</span>
-                                <span className="text-[10px] text-slate-400 uppercase">{s.type} • {s.status}</span>
+                                <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate max-w-[180px]">
+                                    {s.name}
+                                </span>
                              </div>
                           </div>
                           {s.status === 'processing' ? (
-                            <Loader2 size={16} className="animate-spin text-brand-blue"/>
+                            <Loader2 size={14} className="animate-spin text-[#22d3ee]"/>
                           ) : (
-                            <button onClick={() => removeSource(s.id)} className="text-slate-300 hover:text-red-400 transition-colors">
+                            <button onClick={() => removeSource(s.id)} className="text-slate-400 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 transition-colors">
                               <Trash2 size={14} />
                             </button>
                           )}
@@ -537,16 +638,12 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
                      ))}
                    </div>
                    
-                   {/* Sector Enrichment Toggle */}
-                   <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-xl mb-6">
+                   <div className="flex items-center justify-between p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg mb-6">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-blue-100 text-brand-blue flex items-center justify-center">
-                          {isSectorLoading ? <Loader2 size={20} className="animate-spin" /> : <Globe size={20} />}
+                        <div className="text-[#22d3ee] drop-shadow-none dark:drop-shadow-[0_0_5px_rgba(34,211,238,0.5)]">
+                          {isSectorLoading ? <Loader2 size={18} className="animate-spin" /> : <Globe size={18} />}
                         </div>
-                        <div>
-                          <div className="text-sm font-bold text-slate-700">Enrich with Sector Data</div>
-                          <div className="text-xs text-slate-500">Find & add industry standards to source list</div>
-                        </div>
+                        <div className="text-sm font-medium text-slate-700 dark:text-slate-300">Auto-Enrichment</div>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input 
@@ -556,105 +653,95 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
                           disabled={isSectorLoading}
                           className="sr-only peer" 
                         />
-                        <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-blue"></div>
+                        <div className="w-9 h-5 bg-slate-300 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#22d3ee] peer-checked:shadow-sm dark:peer-checked:shadow-[0_0_10px_rgba(34,211,238,0.5)]"></div>
                       </label>
                    </div>
 
                    <InputField 
-                     label="Extracted Info (Editable)" 
+                     label="Compiled Context" 
                      value={formData.companyInfo} 
                      onChange={(val) => updateField('companyInfo', val)} 
-                     placeholder="Uploaded content will appear here automatically..." 
+                     placeholder="Extracted knowledge..." 
                      multiline
                      rows={8}
                    />
-                   <p className="text-[10px] text-slate-400 mt-1">
-                     * Uploaded files and generated sector data are summarized into the text box above.
-                   </p>
                 </div>
               </div>
-            </div>
+          </div>
 
-            <div className="mt-10 pt-8 border-t border-slate-100">
+          <div className="mt-12 pt-8 border-t border-slate-200 dark:border-slate-800/50">
               <button
                 onClick={handleGenerate}
                 disabled={loading}
-                className="w-full py-4 bg-gradient-to-r from-brand-blue to-brand-sky hover:from-blue-600 hover:to-blue-500 text-white font-bold text-lg rounded-xl shadow-lg hover:shadow-xl transition-all disabled:opacity-50 flex items-center justify-center gap-3 transform hover:-translate-y-0.5"
+                className="w-full py-4 btn-ascendancy text-white font-bold text-base rounded-lg disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {loading ? (
-                  <span className="animate-spin text-white">⌛</span>
-                ) : (
-                  <Wand2 className="w-5 h-5" />
-                )}
-                {loading ? 'Designing Architecture...' : 'Generate System Prompt'}
+                {loading ? <Loader2 className="animate-spin" size={20} /> : <Wand2 size={20} />}
+                {loading ? 'Processing...' : 'Generate Agent Architecture'}
               </button>
-            </div>
           </div>
         </div>
       </div>
 
-      {/* Output Column - Fixed for Mobile visibility */}
+      {/* Output Column */}
       <div className={`
-        fixed inset-0 z-50 bg-white transition-transform duration-300 transform flex flex-col
-        xl:static xl:z-auto xl:w-[550px] xl:border-l xl:border-slate-100 xl:translate-x-0
+        fixed inset-0 z-50 bg-slate-50/95 dark:bg-[#0B1120]/95 backdrop-blur-xl transition-transform duration-300 transform flex flex-col
+        xl:static xl:z-auto xl:w-[500px] xl:border-l xl:border-slate-200 dark:xl:border-slate-800 xl:translate-x-0
         ${generatedPrompt ? 'translate-x-0' : 'translate-x-full xl:translate-x-0'}
       `}>
-        <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center backdrop-blur-sm flex-shrink-0">
-          <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-wider">
-            <Bot size={18} className="text-brand-blue"/>
+        <div className="p-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1120] flex justify-between items-center">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-widest flex items-center gap-2">
             System Prompt
           </h3>
           <div className="flex gap-2">
             {generatedPrompt && (
               <>
-                 {/* Mobile Close Button */}
                  <button 
                   onClick={() => setGeneratedPrompt('')}
-                  className="xl:hidden text-slate-400 p-1.5"
+                  className="xl:hidden text-slate-400 p-2"
                 >
                   <X size={20} />
                 </button>
                 <button 
                   onClick={() => setShowIntegration(true)}
-                  className="hidden xl:flex text-xs bg-white border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg font-semibold items-center gap-2 hover:text-brand-blue hover:border-brand-blue/30 transition-colors shadow-sm"
+                  className="hidden xl:flex text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-3 py-1.5 rounded-lg font-bold items-center gap-2 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
                 >
-                  <Share2 size={12} /> Connect
+                  <Share2 size={14} /> Connect
                 </button>
                 <button 
                   onClick={() => navigator.clipboard.writeText(generatedPrompt)}
-                  className="text-xs bg-brand-blue/10 text-brand-blue px-3 py-1.5 rounded-lg font-semibold flex items-center gap-2 hover:bg-brand-blue/20 transition-colors"
+                  className="text-xs border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 py-1.5 rounded-lg font-bold flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                 >
-                  <Copy size={12} /> Copy
+                  <Copy size={14} /> Copy
                 </button>
               </>
             )}
           </div>
         </div>
         
-        <div className="flex-1 p-8 overflow-y-auto bg-slate-50 custom-scrollbar">
+        <div className="flex-1 p-6 overflow-y-auto bg-slate-50 dark:bg-[#020617] custom-scrollbar">
           {generatedPrompt ? (
-             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+             <div className="bg-white dark:bg-[#0B1120] p-4 rounded-lg border border-slate-200 dark:border-slate-800">
                 <textarea
                   value={generatedPrompt}
                   onChange={(e) => setGeneratedPrompt(e.target.value)}
-                  className="w-full h-[600px] font-mono text-xs leading-loose text-slate-600 bg-transparent outline-none resize-none"
+                  className="w-full h-[600px] font-mono text-xs leading-loose text-slate-700 dark:text-slate-300 bg-transparent outline-none resize-none"
                 />
              </div>
           ) : (
-            <div className="h-full flex flex-col items-center justify-center text-slate-300">
-              <Sparkles size={48} className="mb-4 text-slate-200" />
-              <p className="font-bold text-sm uppercase tracking-widest">Awaiting Input</p>
+            <div className="h-full flex flex-col items-center justify-center text-slate-400 dark:text-slate-700">
+              <Bot size={32} className="mb-4 text-slate-300 dark:text-slate-800" />
+              <p className="font-bold text-sm">Waiting for generation</p>
             </div>
           )}
         </div>
 
         {generatedPrompt && (
-          <div className="p-6 bg-white border-t border-slate-100 shadow-[0_-10px_40px_rgba(0,0,0,0.02)] flex-shrink-0">
+          <div className="p-6 bg-white dark:bg-[#0B1120] border-t border-slate-200 dark:border-slate-800">
             <button
               onClick={handleSaveOrUpdate}
-              className="w-full py-4 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-700 transition-colors flex items-center justify-center gap-3 shadow-lg"
+              className="w-full py-3 btn-ascendancy text-white font-bold rounded-lg flex items-center justify-center gap-2"
             >
-              {initialAgent ? 'Update Agent Settings' : 'Save Agent to Dashboard'} <ArrowRight size={18} />
+              {initialAgent ? 'Update Agent' : 'Deploy Agent'} <ArrowRight size={16} />
             </button>
           </div>
         )}
@@ -662,27 +749,26 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
 
       {/* Integration Modal */}
       {showIntegration && (
-        <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-8 animate-fade-in">
-          <div className="bg-white rounded-3xl w-full max-w-2xl flex flex-col shadow-2xl overflow-hidden">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="text-lg font-bold text-slate-800">Integration Setup</h3>
-              <button onClick={() => setShowIntegration(false)} className="text-slate-400 hover:text-slate-600 transition-colors bg-white p-2 rounded-full shadow-sm">
+        <div className="absolute inset-0 bg-black/50 dark:bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-8">
+          <div className="bg-white dark:bg-[#0F172A] rounded-xl w-full max-w-2xl flex flex-col shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+            <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-[#151f32]">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">Integration Payload</h3>
+              <button onClick={() => setShowIntegration(false)} className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">
                 <X size={20}/>
               </button>
             </div>
-            <div className="p-8 space-y-8">
-              <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 text-blue-800 text-sm font-medium flex gap-3">
+            <div className="p-6 space-y-6">
+              <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-100 dark:border-blue-900/50 text-blue-700 dark:text-blue-200 text-sm flex gap-3">
                 <div className="mt-0.5"><Share2 size={16}/></div>
-                <div>Copy the JSON object below into your Make.com "Gemini" module configuration or any other LLM orchestrator.</div>
+                <div>Configured for use with LangChain, Make.com, or custom backends.</div>
               </div>
 
               <div>
-                <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">System Instruction Payload</h4>
+                <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">JSON Configuration</h4>
                 <div 
-                  className="bg-slate-800 p-5 rounded-xl text-xs font-mono text-slate-300 cursor-pointer hover:bg-slate-700 transition-colors relative group" 
+                  className="bg-slate-100 dark:bg-black p-4 rounded-lg text-xs font-mono text-slate-600 dark:text-slate-400 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-900 transition-colors border border-slate-200 dark:border-slate-800" 
                   onClick={() => navigator.clipboard.writeText(generatedPrompt)}
                 >
-                   <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity bg-white text-slate-800 text-[10px] font-bold px-2 py-1 rounded">CLICK TO COPY</div>
                    <div className="line-clamp-6">{generatedPrompt}</div>
                 </div>
               </div>
@@ -693,88 +779,148 @@ const BuildAgent: React.FC<BuildAgentProps> = ({ apiKey, onAgentCreated, initial
 
       {/* Sector Selection Modal */}
       {showSectorModal && (
-        <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4 md:p-8 animate-fade-in">
-          <div className="bg-white rounded-3xl w-full max-w-3xl flex flex-col shadow-2xl overflow-hidden max-h-[90vh]">
-            {/* Header */}
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+        <div className="absolute inset-0 bg-black/50 dark:bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#0F172A] rounded-xl w-full max-w-3xl flex flex-col shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden max-h-[90vh]">
+            <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-[#151f32]">
               <div>
-                 <h3 className="text-xl font-bold text-slate-800 flex items-center gap-3">
-                    <Globe size={20} className="text-brand-blue" />
-                    Sector Intelligence
-                 </h3>
-                 <p className="text-sm text-slate-500 mt-1">Select the knowledge sources you want to import.</p>
+                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">Sector Intelligence</h3>
               </div>
               <button 
                 onClick={() => { setShowSectorModal(false); setEnrichWithSectorData(false); }}
-                className="text-slate-400 hover:text-slate-600 transition-colors bg-white p-2 rounded-full shadow-sm"
+                className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
               >
                 <X size={20}/>
               </button>
             </div>
 
-            {/* Content List */}
-            <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30 custom-scrollbar">
-                <div className="mb-4 flex justify-between items-center">
-                    <span className="text-xs font-bold uppercase tracking-widest text-slate-400">
-                        Found {foundSectorSources.length} Sources
-                    </span>
-                    <button 
-                        onClick={() => setSelectedSectorIndices(new Set(foundSectorSources.map((_, i) => i)))}
-                        className="text-xs text-brand-blue font-bold hover:underline"
-                    >
-                        Select All
-                    </button>
-                </div>
-
-                <div className="space-y-3">
-                    {foundSectorSources.map((source, idx) => {
-                        const isSelected = selectedSectorIndices.has(idx);
-                        return (
-                            <div 
-                                key={idx} 
-                                onClick={() => toggleSectorSelection(idx)}
-                                className={`p-4 rounded-xl border cursor-pointer transition-all flex items-start gap-4 group ${
-                                    isSelected 
-                                    ? 'bg-blue-50 border-brand-blue/30 shadow-sm' 
-                                    : 'bg-white border-slate-200 hover:border-brand-blue/30'
-                                }`}
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50 dark:bg-[#020617] custom-scrollbar">
+                {isSectorLoading ? (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-500">
+                     <Loader2 size={32} className="animate-spin text-[#22d3ee] mb-4" />
+                     <p className="font-medium text-sm">Researching...</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="mb-4 flex justify-between items-center">
+                        <span className="text-xs font-bold uppercase tracking-widest text-slate-500">
+                            {foundSectorSources.length} Sources Found
+                        </span>
+                        {foundSectorSources.length > 0 && (
+                            <button 
+                                onClick={() => setSelectedSectorIndices(new Set(foundSectorSources.map((_, i) => i)))}
+                                className="text-xs text-[#22d3ee] font-bold hover:underline"
                             >
-                                <div className={`mt-0.5 text-brand-blue transition-opacity ${isSelected ? 'opacity-100' : 'opacity-40 group-hover:opacity-60'}`}>
-                                    {isSelected ? <CheckSquare size={20} /> : <Square size={20} />}
-                                </div>
-                                <div className="flex-1">
-                                    <h4 className={`font-bold text-sm mb-1 ${isSelected ? 'text-brand-blue' : 'text-slate-700'}`}>
-                                        {source.title}
-                                    </h4>
-                                    <p className="text-xs text-slate-500 leading-relaxed">
-                                        {source.description}
-                                    </p>
-                                </div>
-                                <div className="p-2 bg-white rounded-lg border border-slate-100 text-slate-400">
-                                   <ExternalLink size={14} />
-                                </div>
+                                Select All
+                            </button>
+                        )}
+                    </div>
+
+                    <div className="space-y-2">
+                        {foundSectorSources.length === 0 || (foundSectorSources.length === 1 && !foundSectorSources[0].uri) ? (
+                            <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 border-dashed">
+                                <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                                No verified sources found.
+                                </p>
+                                <button 
+                                    onClick={() => executeSectorEnrichment(formData.website)}
+                                    className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-lg text-xs font-medium hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                                >
+                                    Retry
+                                </button>
                             </div>
-                        );
-                    })}
-                </div>
+                        ) : (
+                            foundSectorSources.map((source, idx) => {
+                                const isSelected = selectedSectorIndices.has(idx);
+                                const isError = !source.uri;
+                                return (
+                                    <div 
+                                        key={idx} 
+                                        onClick={() => !isError && toggleSectorSelection(idx)}
+                                        className={`p-3 rounded-lg border transition-all flex items-start gap-3 cursor-pointer ${
+                                            isError ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30' :
+                                            isSelected 
+                                            ? 'bg-[#22d3ee]/5 dark:bg-[#22d3ee]/10 border-[#22d3ee]/30 dark:border-[#22d3ee]/40' 
+                                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                                        }`}
+                                    >
+                                        {!isError && (
+                                            <div className={`mt-0.5 ${isSelected ? 'text-[#22d3ee] drop-shadow-none dark:drop-shadow-[0_0_5px_rgba(34,211,238,0.5)]' : 'text-slate-400 dark:text-slate-600'}`}>
+                                                {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                                            </div>
+                                        )}
+                                        <div className="flex-1">
+                                            <h4 className={`font-semibold text-sm ${isError ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-slate-200'}`}>
+                                                {source.title}
+                                            </h4>
+                                            <p className="text-xs text-slate-500 line-clamp-2 mt-1">
+                                                {source.description}
+                                            </p>
+                                        </div>
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
+                  </>
+                )}
             </div>
 
-            {/* Footer */}
-            <div className="p-6 border-t border-slate-100 bg-white flex justify-end gap-3">
+            <div className="p-5 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B1120] flex justify-end gap-3">
                 <button 
                   onClick={() => { setShowSectorModal(false); setEnrichWithSectorData(false); }}
-                  className="px-6 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50 transition-colors"
+                  className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                 >
                   Cancel
                 </button>
                 <button 
                   onClick={handleImportSectorSources}
-                  disabled={selectedSectorIndices.size === 0}
-                  className="px-8 py-3 rounded-xl bg-brand-blue text-white font-bold text-sm hover:bg-blue-600 transition-colors shadow-lg hover:shadow-xl disabled:opacity-50 disabled:shadow-none"
+                  disabled={selectedSectorIndices.size === 0 || isSectorLoading}
+                  className="px-5 py-2 btn-ascendancy text-white rounded-lg text-sm font-bold transition-colors disabled:opacity-50"
                 >
-                  Import {selectedSectorIndices.size} Sources
+                  Import Selected
                 </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Website Missing Modal */}
+      {showWebsiteMissingModal && (
+        <div className="absolute inset-0 bg-black/50 dark:bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-sm shadow-2xl p-6">
+             <div className="text-center mb-6">
+               <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Website Required</h3>
+               <p className="text-sm text-slate-500 dark:text-slate-400">
+                 Enter URL to analyze.
+               </p>
+             </div>
+             
+             <div className="mb-6">
+               <input
+                 type="text"
+                 value={tempWebsiteInput}
+                 onChange={(e) => setTempWebsiteInput(e.target.value)}
+                 placeholder="www.company.com"
+                 className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:border-[#22d3ee] outline-none transition-all text-sm focus:shadow-[0_0_10px_rgba(34,211,238,0.3)]"
+                 autoFocus
+               />
+             </div>
+
+             <div className="flex gap-3">
+               <button 
+                 onClick={() => setShowWebsiteMissingModal(false)}
+                 className="flex-1 py-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-sm font-medium"
+               >
+                 Cancel
+               </button>
+               <button 
+                 onClick={confirmWebsiteModal}
+                 disabled={!tempWebsiteInput.trim()}
+                 className="flex-1 py-2 btn-ascendancy text-white rounded-lg text-sm font-bold transition-colors disabled:opacity-50"
+               >
+                 Analyze
+               </button>
+             </div>
           </div>
         </div>
       )}
