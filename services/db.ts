@@ -60,7 +60,16 @@ export const db = {
   },
 
   settings: {
-    getApiKey: (): string => localStorage.getItem(KEYS.API_KEY) || "AIzaSyAQoF-dKemMSyu4RakBepS33GbECauUGm0",
+    getApiKey: (): string => {
+      // SECURITY FIX: Removed hardcoded API Key.
+      // Checks LocalStorage first, then Process Env (if available), else returns empty string.
+      const local = localStorage.getItem(KEYS.API_KEY);
+      if (local) return local;
+      if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+        return process.env.API_KEY;
+      }
+      return "";
+    },
     setApiKey: (key: string) => localStorage.setItem(KEYS.API_KEY, key),
     getTheme: (): 'light' | 'dark' => (localStorage.getItem(KEYS.THEME) as 'light'|'dark') || 'dark',
     setTheme: (theme: 'light' | 'dark') => localStorage.setItem(KEYS.THEME, theme)
